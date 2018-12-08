@@ -12,7 +12,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 
 from .permissions import SuperUserMixin
 from .forms import ProjectForm
-from .models import Document, Project
+from .models import Document, Project, SequenceAnnotation, Label
 
 
 class IndexView(TemplateView):
@@ -73,15 +73,53 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                         Document(text=line[0].strip(), project=project)
                         for line in reader
                     ])
-
             elif import_format == 'json':
                 form_data = request.FILES['file'].file
-                Document.objects.bulk_create([
-                    Document(text=json.loads(entry)['text'], project=project)
-                    for entry in form_data
-                ])
+                text_list = json.loads(form_data.read())
+                text_list = filter(lambda x: 'text' in x and x['text'] is not None,
+                                    text_list)
+                docs = []
+                seqanns = []
+                for entry in text_list:
+                    doc = Document(text=entry['text'], project=project)
+
+                    if 'seq_annotations' in entry:
+                        # parse annotations    
+                        # insert a document
+                        doc.save()
+                        ann = entry['seq_annotations']
+                        lbl = ann['label']
+                        try:
+                            label = Label.objects.get(
+                                          project=project,
+                                          text=lbl,
+                                          )
+                        except:
+                            # print('creating a label:', lbl)
+                            label = Label(
+                                          project=project,
+                                          text=lbl,
+                                          shortcut=lbl[0],
+                                          )
+                            label.save()
+                        seqann = SequenceAnnotation(
+                                        user=request.user,
+                                        document=doc,
+                                        label=label,
+                                        start_offset =ann['start'],
+                                        end_offset =ann['end'],
+                            )
+                        seqanns.append(seqann)
+                    else:
+                        docs.append(doc)
+                if len(docs)>0:
+                    Document.objects.bulk_create(docs)
+                if len(seqanns)>0:
+                    SequenceAnnotation.objects.bulk_create(seqanns)
+
             return HttpResponseRedirect(reverse('dataset', args=[project.id]))
-        except:
+        except Exception as ee:
+            print("EXCEPTION", ee)
             return HttpResponseRedirect(reverse('upload', args=[project.id]))
 
 
