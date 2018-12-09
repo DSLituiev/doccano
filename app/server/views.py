@@ -13,7 +13,15 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from .permissions import SuperUserMixin
 from .forms import ProjectForm
 from .models import Document, Project, SequenceAnnotation, Label
+from itertools import cycle
 
+COLORSCHEME = ['#a6cee3', '#b2df8a', '#fb9a99', '#fdbf6f', '#cab2d6',
+               '#1f78b4', '#33a02c', '#e31a1c', '#ff7f00', '#6a3d9a']
+#COLORSCHEME = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99',
+#                '#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a',]
+
+COLORSCHEME_CYCLE = cycle(COLORSCHEME)
+TEXT_COLOR_FLAG = True
 
 class IndexView(TemplateView):
     template_name = 'index.html'
@@ -81,35 +89,46 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                 docs = []
                 seqanns = []
                 for entry in text_list:
-                    doc = Document(text=entry['text'], project=project)
-
+                    title = entry['id'] if 'id' in entry else None
+                    doc = Document(text=entry['text'], project=project, title=title)
                     if 'seq_annotations' in entry:
                         # parse annotations    
                         # insert a document
                         doc.save()
-                        ann = entry['seq_annotations']
-                        lbl = ann['label']
-                        try:
-                            label = Label.objects.get(
-                                          project=project,
-                                          text=lbl,
-                                          )
-                        except:
-                            # print('creating a label:', lbl)
-                            label = Label(
-                                          project=project,
-                                          text=lbl,
-                                          shortcut=lbl[0],
-                                          )
-                            label.save()
-                        seqann = SequenceAnnotation(
-                                        user=request.user,
-                                        document=doc,
-                                        label=label,
-                                        start_offset =ann['start'],
-                                        end_offset =ann['end'],
-                            )
-                        seqanns.append(seqann)
+                        doc_annotations = entry['seq_annotations']
+                        for ann in doc_annotations:
+                            lbl = ann['label']
+                            try:
+                                label = Label.objects.get(
+                                              project=project,
+                                              text=lbl,
+                                              )
+                            except:
+                                # print('creating a label:', lbl)
+                                color = next(COLORSCHEME_CYCLE)
+                                color_flag = request.session.get('color_flag')
+                                if not color_flag:
+                                    color_flag = 0
+                                else:
+                                    color_flag += 1
+                                request.session['color_flag'] = color_flag
+                                text_color='#ffffff' if color_flag % 5 % 2 else '#000000'
+                                label = Label(
+                                              project=project,
+                                              text=lbl,
+                                              shortcut=lbl[0],
+                                              background_color=color,
+                                              text_color=text_color,
+                                              )
+                                label.save()
+                            seqann = SequenceAnnotation(
+                                            user=request.user,
+                                            document=doc,
+                                            label=label,
+                                            start_offset =ann['start'],
+                                            end_offset =ann['end'],
+                                )
+                            seqanns.append(seqann)
                     else:
                         docs.append(doc)
                 if len(docs)>0:
