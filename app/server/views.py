@@ -9,14 +9,16 @@ from django.views import View
 from django.views.generic import TemplateView, CreateView
 from django.views.generic.list import ListView
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.forms.models import model_to_dict
 
 from .permissions import SuperUserMixin
 from .forms import ProjectForm
 from .models import Document, Project, SequenceAnnotation, Label
 from itertools import cycle
 
-COLORSCHEME = ['#a6cee3', '#b2df8a', '#fb9a99', '#fdbf6f', '#cab2d6',
-               '#1f78b4', '#33a02c', '#e31a1c', '#ff7f00', '#6a3d9a']
+COLORSCHEME = ['#a6cee3', '#fb9a99', '#b2df8a', '#fdbf6f', '#cab2d6', '#ffff99',
+               '#1f78b4', '#e31a1c', '#33a02c', '#ff7f00', '#6a3d9a', '#b15928']
+N_COLORS = (len(COLORSCHEME)//2)
 #COLORSCHEME = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99',
 #                '#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a',]
 
@@ -112,7 +114,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                 else:
                                     color_flag += 1
                                 request.session['color_flag'] = color_flag
-                                text_color='#ffffff' if color_flag % 5 % 2 else '#000000'
+                                text_color='#ffffff' if color_flag % N_COLORS % 2 else '#000000'
                                 label = Label(
                                               project=project,
                                               text=lbl,
@@ -125,8 +127,8 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                             user=request.user,
                                             document=doc,
                                             label=label,
-                                            start_offset =ann['start'],
-                                            end_offset =ann['end'],
+                                            start_offset=ann['start'],
+                                            end_offset=ann['end'],
                                 )
                             seqanns.append(seqann)
                     else:
@@ -143,7 +145,6 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
 
 
 class DataDownload(SuperUserMixin, LoginRequiredMixin, View):
-
     def get(self, request, *args, **kwargs):
         project_id = self.kwargs['project_id']
         project = get_object_or_404(Project, pk=project_id)
@@ -151,13 +152,41 @@ class DataDownload(SuperUserMixin, LoginRequiredMixin, View):
         filename = '_'.join(project.name.lower().split())
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="{}.csv"'.format(filename)
-
         writer = csv.writer(response)
         for d in docs:
             writer.writerows(d.make_dataset())
-
         return response
 
+
+from django.core import serializers
+class JsonDownload(SuperUserMixin, LoginRequiredMixin, View):
+
+    def get(self, request, *args, **kwargs):
+        project_id = self.kwargs['project_id']
+        project = get_object_or_404(Project, pk=project_id)
+
+        filename = '_'.join(project.name.lower().split())
+        response = HttpResponse(content_type='text/json')
+        response['Content-Disposition'] = 'attachment; filename="{}.json"'.format(filename)
+
+        docs = project.get_documents(is_null=False).distinct()
+        dump = []
+        for doc in docs:
+            #print('DOC', type(doc))
+            anns = list(doc.get_annotations().values())
+            doc_ = model_to_dict(doc)
+            for ann in anns:
+                ann.pop('id')
+                ann.pop('document_id')
+            doc_['seq_annotations'] = anns
+            dump.append(doc_)
+
+        print('DUMP', dump)
+        #dump = [serializers.serialize('json', x) for x in dump]
+        #print('DUMP', dump)
+        dump = json.dumps(dump)
+        response.write(dump)
+        return response
 
 class DemoTextClassification(TemplateView):
     template_name = 'demo/demo_text_classification.html'
