@@ -32,9 +32,9 @@ class Project(models.Model):
         return project_type == self.project_type
 
     def get_progress(self, user):
-        docs = self.get_documents(is_null=True, user=user)
         total = self.documents.count()
-        remaining = docs.count()
+        done = self.get_documents(is_null=False, user=user, manual=True).count()
+        remaining = total - done
         return {'total': total, 'remaining': remaining}
 
     @property
@@ -60,26 +60,26 @@ class Project(models.Model):
 
         return template_name
 
-    def get_documents(self, is_null=True, user=None):
-        docs = self.documents.all()
+    def get_documents(self, is_null=True, user=None, **kwargs):
+        params = dict(**kwargs)
         if self.is_type_of(Project.DOCUMENT_CLASSIFICATION):
-            if user:
-                docs = docs.exclude(doc_annotations__user=user)
-            else:
-                docs = docs.filter(doc_annotations__isnull=is_null)
+            prefix = 'doc_annotations'
         elif self.is_type_of(Project.SEQUENCE_LABELING):
-            if user:
-                docs = docs.exclude(seq_annotations__user=user)
-            else:
-                docs = docs.filter(seq_annotations__isnull=is_null)
+            prefix = 'seq_annotations'
         elif self.is_type_of(Project.Seq2seq):
-            if user:
-                docs = docs.exclude(seq2seq_annotations__user=user)
-            else:
-                docs = docs.filter(seq2seq_annotations__isnull=is_null)
+            prefix = 'seq2seq_annotations'
         else:
             raise ValueError('Invalid project_type')
 
+        params = { '{}__{}'.format(prefix,kk):vv for kk,vv in params.items()}
+        docs = self.documents.all()
+        if user:
+            params['{}__{}'.format(prefix, 'user')] = user
+            #docs = docs.exclude(**params)
+            docs = docs.filter(**params)
+        else:
+            params['{}__{}'.format(prefix, 'isnull')] = is_null
+            docs = docs.filter(**params)
         return docs
 
     def get_document_serializer(self):
@@ -188,7 +188,7 @@ class Document(models.Model):
 
 class Annotation(models.Model):
     prob = models.FloatField(default=0.0)
-    manual = models.BooleanField(default=False)
+    manual = models.BooleanField(default=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
 
     class Meta:

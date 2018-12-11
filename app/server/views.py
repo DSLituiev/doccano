@@ -129,6 +129,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                             label=label,
                                             start_offset=ann['start'],
                                             end_offset=ann['end'],
+                                            manual=False,
                                 )
                             seqanns.append(seqann)
                     else:

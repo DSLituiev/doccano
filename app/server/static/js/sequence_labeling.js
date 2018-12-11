@@ -49,6 +49,7 @@ Vue.component('annotator', {
       }
       this.startOffset = start;
       this.endOffset = end;
+      this.manual = true;
       console.log(start, end);
     },
 
@@ -91,6 +92,7 @@ Vue.component('annotator', {
           start_offset: this.startOffset,
           end_offset: this.endOffset,
           label: labelId,
+          manual: true,
         };
         this.$emit('add-label', label);
       }
@@ -106,6 +108,7 @@ Vue.component('annotator', {
         label: -1,
         start_offset: startOffset,
         end_offset: endOffset,
+        manual: true,
       };
       return label;
     },
