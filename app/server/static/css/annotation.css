@@ -141,13 +141,18 @@ body {
 
 .content .tag {
   font-size: 16pt;
-  height: 1.5em;
+  max-width: 100%;
+  line-height: 1.7em;
   padding-left: .5em;
   padding-right: .5em;
+  word-wrap: normal;
+  display: inline;
+  white-space: pre-line;
 }
 
 .content .text {
   white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 :focus {

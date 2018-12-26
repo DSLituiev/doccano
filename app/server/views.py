@@ -2,6 +2,7 @@ import csv
 import json
 from io import TextIOWrapper
 
+from django.db.utils import IntegrityError
 from django.urls import reverse
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -91,7 +92,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                 docs = []
                 seqanns = []
                 for entry in text_list:
-                    title = entry['id'] if 'id' in entry else None
+                    title = entry['id'] if 'id' in entry else (entry['title'] if 'title' in entry else None)
                     doc = Document(text=entry['text'], project=project, title=title)
                     if 'seq_annotations' in entry:
                         # parse annotations    
@@ -105,8 +106,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                               project=project,
                                               text=lbl,
                                               )
-                            except:
-                                # print('creating a label:', lbl)
+                            except Label.DoesNotExist:
                                 color = next(COLORSCHEME_CYCLE)
                                 color_flag = request.session.get('color_flag')
                                 if not color_flag:
@@ -114,15 +114,38 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                 else:
                                     color_flag += 1
                                 request.session['color_flag'] = color_flag
-                                text_color='#ffffff' if color_flag % N_COLORS % 2 else '#000000'
-                                label = Label(
-                                              project=project,
-                                              text=lbl,
-                                              shortcut=lbl[0],
-                                              background_color=color,
-                                              text_color=text_color,
-                                              )
-                                label.save()
+                                text_color='#ffffff' if color_flag % N_COLORS % 2 \
+                                            else '#000000'
+                                try:
+                                    label = Label(
+                                                  project=project,
+                                                  text=lbl,
+                                                  shortcut=lbl[0],
+                                                  background_color=color,
+                                                  text_color=text_color,
+                                                  )
+                                    label.save()
+                                except IntegrityError as ei:
+                                    labels = Label.objects.filter(project=project)
+                                    shortcuts = [la.shortcut for la in labels]
+                                    other_lbl = [la.text for la in labels if la.shortcut==lbl[0]][0]
+                                    shortcut_proposal = [l1 for l1, l2 in zip(lbl,other_lbl) if l1!=l2]
+                                    shortcut_proposal = [x for x in shortcut_proposal if x not in shortcuts]
+                                    vowels = set('aeiou')
+                                    shortcut_proposal_consonant = [x for x in shortcut_proposal\
+                                            if x not in vowels]
+                                    if len(shortcut_proposal_consonant)>0:
+                                        shortcut = shortcut_proposal_consonant[0]
+                                    else:
+                                        shortcut = shortcut_proposal[0]
+                                    label = Label(
+                                                  project=project,
+                                                  text=lbl,
+                                                  shortcut=shortcut,
+                                                  background_color=color,
+                                                  text_color=text_color,
+                                                  )
+                                    label.save()
                             seqann = SequenceAnnotation(
                                             user=request.user,
                                             document=doc,
@@ -130,7 +153,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                             start_offset=ann['start'],
                                             end_offset=ann['end'],
                                             manual=False,
-                                )
+                                            )
                             seqanns.append(seqann)
                     else:
                         docs.append(doc)
@@ -141,7 +164,9 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
 
             return HttpResponseRedirect(reverse('dataset', args=[project.id]))
         except Exception as ee:
+            print("ENTRY", entry)
             print("EXCEPTION", ee)
+            #raise ee
             return HttpResponseRedirect(reverse('upload', args=[project.id]))
 
 
@@ -169,22 +194,20 @@ class JsonDownload(SuperUserMixin, LoginRequiredMixin, View):
         filename = '_'.join(project.name.lower().split())
         response = HttpResponse(content_type='text/json')
         response['Content-Disposition'] = 'attachment; filename="{}.json"'.format(filename)
-
+        labels = project.labels.all().values()
+        labels = {x['id']:x['text'] for x in labels}
         docs = project.get_documents(is_null=False).distinct()
         dump = []
         for doc in docs:
-            #print('DOC', type(doc))
             anns = list(doc.get_annotations().values())
             doc_ = model_to_dict(doc)
             for ann in anns:
                 ann.pop('id')
                 ann.pop('document_id')
+                ann['label'] = labels[ann.pop('label_id')]
             doc_['seq_annotations'] = anns
             dump.append(doc_)
 
-        print('DUMP', dump)
-        #dump = [serializers.serialize('json', x) for x in dump]
-        #print('DUMP', dump)
         dump = json.dumps(dump)
         response.write(dump)
         return response
