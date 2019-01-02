@@ -4,6 +4,7 @@ from django.db import models
 from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.db.models import Q, Count, Avg, Max, Min
 
 
 class Project(models.Model):
@@ -32,10 +33,19 @@ class Project(models.Model):
         return project_type == self.project_type
 
     def get_progress(self, user):
-        total = self.documents.count()
-        done = self.get_documents(is_null=False, user=user, manual=True).count()
-        remaining = total - done
-        return {'total': total, 'remaining': remaining}
+        n_total = self.documents.count()
+        ids_all_docs = self.documents.aggregate(Min('id'), Max('id'))
+        n_total_ids =  ids_all_docs['id__max'] - ids_all_docs['id__min'] + 1
+        print('TOTAL', n_total_ids, n_total)
+        done = self.get_documents(is_null=False, user=user, manual=True)
+        n_done = done.count()
+        max_id_done = done.aggregate(Max('id'))['id__max']
+        n_ids_done = max_id_done - ids_all_docs['id__min'] + 1
+        # formula #1 for literally all manually annotated
+        #remaining = n_total - n_done
+        # formula #2 for all checked documents
+        remaining = n_total_ids - n_ids_done
+        return {'total': n_total, 'remaining': remaining}
 
     @property
     def image(self):
@@ -72,14 +82,18 @@ class Project(models.Model):
             raise ValueError('Invalid project_type')
 
         params = { '{}__{}'.format(prefix,kk):vv for kk,vv in params.items()}
-        docs = self.documents.all()
+        #docs = self.documents.all()
+        docs = self.documents.annotate(
+                matching_annot=Count(prefix, filter=Q(**params))
+                )
         if user:
             params['{}__{}'.format(prefix, 'user')] = user
             #docs = docs.exclude(**params)
-            docs = docs.filter(**params)
+            #docs = docs.filter(**params)
         else:
             params['{}__{}'.format(prefix, 'isnull')] = is_null
-            docs = docs.filter(**params)
+        #docs = docs.filter(**params)
+        docs = docs.filter(matching_annot__gt=0)
         return docs
 
     def get_document_serializer(self):
