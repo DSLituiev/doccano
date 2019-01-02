@@ -17,11 +17,11 @@ from .forms import ProjectForm
 from .models import Document, Project, SequenceAnnotation, Label
 from itertools import cycle
 
+from .colorspace import lightness
+
 COLORSCHEME = ['#a6cee3', '#fb9a99', '#b2df8a', '#fdbf6f', '#cab2d6', '#ffff99',
                '#1f78b4', '#e31a1c', '#33a02c', '#ff7f00', '#6a3d9a', '#b15928']
 N_COLORS = (len(COLORSCHEME)//2)
-#COLORSCHEME = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99',
-#                '#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a',]
 
 COLORSCHEME_CYCLE = cycle(COLORSCHEME)
 TEXT_COLOR_FLAG = True
@@ -66,6 +66,34 @@ class GuidelineView(SuperUserMixin, LoginRequiredMixin, TemplateView):
 class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
     template_name = 'admin/dataset_upload.html'
 
+    def unpack_annotation(self, ann):
+        try:
+            start_offset = ann[self.field_start]
+            end_offset = ann[self.field_end]
+        except KeyError as ke:
+            self.field_start = None
+            for alt_s, alt_e in zip(self.field_alt_start, self.field_alt_end):
+                if (alt_s in ann) and (alt_e in ann):
+                    self.field_start = alt_s
+                    self.field_end = alt_e
+                    break
+            if self.field_start is None:
+                raise ke
+            start_offset = ann[self.field_start]
+            end_offset = ann[self.field_end]
+        try:
+            label = ann[self.field_label]
+        except KeyError as ke:
+            self.field_label = None
+            for alt_l in self.field_alt_label:
+                if (alt_l in ann):
+                    self.field_label = alt_l
+                    break
+            if self.field_label is None:
+                raise ke
+            label = ann[self.field_label]
+        return label, start_offset, end_offset
+
     def post(self, request, *args, **kwargs):
         project = get_object_or_404(Project, pk=kwargs.get('project_id'))
         import_format = request.POST['format']
@@ -85,6 +113,15 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                         for line in reader
                     ])
             elif import_format == 'json':
+                # set the annotation dictionary field names.
+                # if the pre-set field name is not found, alternatives are assumed
+                self.field_alt_start = ['start', 's']
+                self.field_alt_end = ['end', 'e']
+                self.field_alt_label = ['l', 'id']
+                self.field_title = 'title'
+                self.field_start = 'start_offset'
+                self.field_end = 'end_offset'
+                self.field_label = 'label'
                 form_data = request.FILES['file'].file
                 text_list = json.loads(form_data.read())
                 text_list = filter(lambda x: 'text' in x and x['text'] is not None,
@@ -92,7 +129,14 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                 docs = []
                 seqanns = []
                 for entry in text_list:
-                    title = entry['id'] if 'id' in entry else (entry['title'] if 'title' in entry else None)
+                    try:
+                        title = entry[self.field_title]
+                    except:
+                        if 'id' in entry:
+                            self.field_title='id'
+                            title = entry[self.field_title]
+                        else:
+                            continue
                     doc = Document(text=entry['text'], project=project, title=title)
                     if 'seq_annotations' in entry:
                         # parse annotations    
@@ -100,7 +144,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                         doc.save()
                         doc_annotations = entry['seq_annotations']
                         for ann in doc_annotations:
-                            lbl = ann['label']
+                            lbl, start_, end_ = self.unpack_annotation(ann)
                             try:
                                 label = Label.objects.get(
                                               project=project,
@@ -108,13 +152,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                               )
                             except Label.DoesNotExist:
                                 color = next(COLORSCHEME_CYCLE)
-                                color_flag = request.session.get('color_flag')
-                                if not color_flag:
-                                    color_flag = 0
-                                else:
-                                    color_flag += 1
-                                request.session['color_flag'] = color_flag
-                                text_color='#ffffff' if color_flag % N_COLORS % 2 \
+                                text_color='#ffffff' if  lightness(color)<127 \
                                             else '#000000'
                                 try:
                                     label = Label(
@@ -146,12 +184,13 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                                                   text_color=text_color,
                                                   )
                                     label.save()
+
                             seqann = SequenceAnnotation(
                                             user=request.user,
                                             document=doc,
                                             label=label,
-                                            start_offset=ann['start'],
-                                            end_offset=ann['end'],
+                                            start_offset=start_,
+                                            end_offset=end_,
                                             manual=False,
                                             )
                             seqanns.append(seqann)
