@@ -16,6 +16,7 @@ from .permissions import SuperUserMixin
 from .forms import ProjectForm
 from .models import Document, Project, SequenceAnnotation, Label
 from itertools import cycle
+from warnings import warn
 
 from .colorspace import lightness
 
@@ -203,8 +204,7 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
 
             return HttpResponseRedirect(reverse('dataset', args=[project.id]))
         except Exception as ee:
-            print("ENTRY", entry)
-            print("EXCEPTION", ee)
+            warn(str(ee))
             #raise ee
             return HttpResponseRedirect(reverse('upload', args=[project.id]))
 
